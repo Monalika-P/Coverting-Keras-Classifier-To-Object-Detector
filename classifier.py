@@ -15,14 +15,10 @@ import argparse
 
 # construct the argument parse and parse the arguments
 ap = argparse.ArgumentParser()
-ap.add_argument("-i", "--image", required=True,
-	help="path to the input image")
-ap.add_argument("-s", "--size", type=str, default="(200, 150)",
-	help="ROI size (in pixels)")
-ap.add_argument("-c", "--min-conf", type=float, default=0.9,
-	help="minimum probability to filter weak detections")
-ap.add_argument("-v", "--visualize", type=int, default=-1,
-	help="whether or not to show extra visualizations for debugging")
+ap.add_argument("-i", "--image", required=True, help="path to the input image")
+ap.add_argument("-s", "--size", type=str, default="(200, 150)", help="ROI size (in pixels)")
+ap.add_argument("-c", "--min-conf", type=float, default=0.9, help="minimum probability to filter weak detections")
+ap.add_argument("-v", "--visualize", type=int, default=-1, help= "whether or not to show extra visualizations for debugging")
 args = vars(ap.parse_args())
 
 # initialize variables used for the object detection procedure
@@ -56,10 +52,62 @@ locs = []
 start = time.time()
 
 for image in pyramid:
-    scale = W / float(image.shape[1])
+    scale = W / float(image.shape[1]) #Diving the width by iamge width(Height,Width,Channels')
 
     for (x, y, roiOrig) in sliding_window(image, WIN_STEP, ROI_SIZE):
         x = int(x * scale)
         y = int(y * scale)
         w = int(ROI_SIZE[0] * scale)
-        h = int()
+        h = int(ROI_SIZE[1] * scale)
+
+        roi = cv2.resize(roiOrig, INPUT_SIZE)
+        roi = img_to_array(roi)
+        roi = preprocess_input(roi)
+
+        rois.append(roi)
+        locs.append((x, y, x + w, y + h))
+        if args["visualize"] > 0:
+            clone = orig.copy()
+            cv2.rectangle(clone, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            cv2.imshow("Visualization", clone)
+            cv2.imshow("ROI", roiOrig)
+            cv2.waitKey(0)
+
+end = time.time()
+
+rois = np.array(rois, dtype="float32")
+print("[INFO] classifying ROIs...")
+start = time.time()
+preds = model.predict(rois)
+end = time.time()
+print("[INFO] classifying ROIs took {:.5f} seconds".format(end - start))
+preds = imagenet_utils.decode_predictions(preds, top=1)
+labels = {}
+print("Prediction is",preds)
+for (i,p) in enumerate(preds):
+    (imagenetID, label, prob) = p[0]
+    if prob >= args["min_conf"]:
+        # grab the bounding box associated with the prediction and
+        # convert the coordinates
+        box = locs[i]
+        # grab the list of predictions for the label and add the
+        # bounding box and probability to the list
+        L = labels.get(label, [])
+        L.append((box, prob))
+        labels[label] = L
+
+# loop over the labels for each of detected objects in the image
+
+for label in labels.keys():
+    print("[INFO] showing results for '{}'".format(label))
+    clone = orig.copy()
+    for (box, prob) in labels[label]:
+        (startX, startY, endX, endY) = box
+        cv2.rectangle(clone, (startX, startY), (endX, endY), (0, 255, 0), 2)
+    cv2.imshow("Before", clone)
+    clone = orig.copy()
+    boxes = np.array([p[0] for p in labels[label]])
+    proba = np.array([p[1] for p in labels[label]])
+    boxes = non_max_suppression(boxes, proba)
+
+
